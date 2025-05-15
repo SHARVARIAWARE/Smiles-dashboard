@@ -38,13 +38,13 @@ with st.sidebar:
     uploaded_file = st.file_uploader("📤 Upload Excel file with SMILES data in column name 'smiles'", type=["xlsx"])
 
 # Load models
-activity_model = joblib.load(r"C:\Users\admin\Downloads\Notebook\hybrid_model.pkl")
+activity_model = joblib.load("hybrid_model.pkl")
 admet_models = {
-    "(Absorption) Caco-2": joblib.load(r"C:\Users\admin\Downloads\Notebook\absorp_model.pkl"),
-    "(Distribution) BBB": joblib.load(r"C:\Users\admin\Downloads\Notebook\distri_model.pkl"),
-    "(Metabolism) CYP3A4": joblib.load(r"C:\Users\admin\Downloads\Notebook\meta_model.pkl"),
-    "(Excretion) Obach": joblib.load(r"C:\Users\admin\Downloads\Notebook\exc_model.pkl"),
-    "(Toxicity) NR-AR": joblib.load(r"C:\Users\admin\Downloads\Notebook\toxicity_model.pkl"),
+    "(Absorption) Caco-2": joblib.load("absorp_model.pkl"),
+    "(Distribution) BBB": joblib.load("distri_model.pkl"),
+    "(Metabolism) CYP3A4": joblib.load("meta_model.pkl"),
+    "(Excretion) Obach": joblib.load("exc_model.pkl"),
+    "(Toxicity) NR-AR": joblib.load("toxicity_model.pkl"),
 }
 
 ds_col = [
