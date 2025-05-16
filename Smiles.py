@@ -6,6 +6,81 @@ from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors
 from io import BytesIO
 import plotly.express as px
+import os
+
+# ------------------------------- #
+# Page Configuration
+# ------------------------------- #
+st.set_page_config(
+    page_title="🧬 SMILES Activity & ADMET Predictor",
+    layout="wide",
+    page_icon="🧪"
+)
+
+st.title("🧬 SMILES-Based Activity & ADMET Property Predictor")
+st.markdown("Upload your **SMILES dataset** and get predictions for **biological activity and ADMET** properties using machine learning models.")
+st.markdown("---")
+
+# ------------------------------- #
+# Sidebar
+# ------------------------------- #
+with st.sidebar:
+    st.header("📁 Upload Data")
+    uploaded_file = st.file_uploader("Upload an Excel file with a `smiles` column", type=["xlsx"])
+    st.markdown("---")
+    st.info("You can download results as Excel after prediction.")
+
+# ------------------------------- #
+# Load Models
+# ------------------------------- #
+@st.cache_resource
+def load_models():
+    try:
+        return {
+            "Activity": joblib.load("hybrid_model.pkl"),
+            "(Absorption) Caco-2": joblib.load("absorp_model.pkl"),
+            "(Distribution) BBB": joblib.load("distri_model.pkl"),
+            "(Metabolism) CYP3A4": joblib.load("meta_model.pkl"),
+            "(Excretion) Obach": joblib.load("exc_model.pkl"),
+            "(Toxicity) NR-AR": joblib.load("toxicity_model.pkl"),
+        }
+    except FileNotFoundError as e:
+        st.error(f"❌ Model file not found: {e}")
+        st.stop()
+
+models = load_models()
+activity_model = models["Activity"]
+
+descriptor_columns = [
+    "MolWt", "NumHDonors", "NumHAcceptors", "TPSA", "NumRotatableBonds", "MolLogP",
+    "FpDensityMorgan1", "NumAromaticRings", "FractionCSP3", "NumAliphaticRings",
+    "FpDensityMorgan2", "HeavyAtomMolWt"
+]
+
+# ------------------------------- #
+# Utility Functions
+# ------------------------------- #
+def calculate_descriptors(smiles):
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol:
+            return [
+                Descriptors.MolWt(mol),
+                Descriptors.NumHDonors(mol),
+                Descriptors.NumHAcceptors(mol),
+                Descriptors.TPSA(mol),
+                rdMolDescriptors.CalcNumRotatableBonds(mol),
+                Descriptors.MolLogP(mol),
+                Descriptors.FpDensityMorgan1(mol),
+                Descriptors.NumAromaticRings(mol),
+                Descriptors.FractionCSP3(mol),
+                Descriptors.NumAliphaticRings(mol),
+                Descriptors.FpDensityMorgan2(mol),
+                Descriptors.HeavyAtomMolWt(mol)
+            ]
+    except:
+        return [0] * len(descriptor_columns)
+    return [0] * len(descriptor_columns)
 
 def get_activity_status(row):
     if pd.isna(row["Probability"]):
@@ -13,198 +88,102 @@ def get_activity_status(row):
     if row["Prediction"] == 0:
         return "Inactive"
     elif row["Probability"] <= 0.75:
-        if row['Prediction'] == 1:
-            return f"Low chance of (10 μM)"
-        elif row['Prediction'] == 2:
-            return f"Low chance of (1 and 10 μM)"
-        else:
-            return "Low chance of non-hits"
+        return f"Low confidence - {row['Concentration']}"
     else:
-        if row['Prediction'] == 1:
-            return f"High chance of (10 μM)"
-        elif row['Prediction'] == 2:
-            return f"High chance of (1 and 10 μM)"
-        else:
-            return "High chance of non-hits"
+        return f"High confidence - {row['Concentration']}"
 
-# Page configuration
-st.set_page_config(page_title="SMILES-Based Activity + ADMET Predictor", layout="wide")
-
-# Sidebar branding
-with st.sidebar:
-    st.title("🧪Smiles Activity and ADMET Properties Predictor")
-    st.markdown("**Predict Activity and ADMET properties** using SMILES strings  .")
-    st.markdown("---")
-    uploaded_file = st.file_uploader("📤 Upload Excel file with SMILES data in column name 'smiles'", type=["xlsx"])
-
-# Load models
-activity_model = joblib.load("hybrid_model.pkl")
-admet_models = {
-    "(Absorption) Caco-2": joblib.load("absorp_model.pkl"),
-    "(Distribution) BBB": joblib.load("distri_model.pkl"),
-    "(Metabolism) CYP3A4": joblib.load("meta_model.pkl"),
-    "(Excretion) Obach": joblib.load("exc_model.pkl"),
-    "(Toxicity) NR-AR": joblib.load("toxicity_model.pkl"),
-}
-
-ds_col = [
-    "MolWt", "NumHDonors", "NumHAcceptors", "TPSA", "NumRotatableBonds", "MolLogP",
-    "FpDensityMorgan1", "NumAromaticRings", "FractionCSP3", "NumAliphaticRings",
-    "FpDensityMorgan2", "HeavyAtomMolWt"
-]
-
-def calculate_molecular_properties(smiles):
-    try:
-        molecule = Chem.MolFromSmiles(smiles)
-        if molecule:
-            return [
-                Descriptors.MolWt(molecule),
-                Descriptors.NumHDonors(molecule),
-                Descriptors.NumHAcceptors(molecule),
-                Descriptors.TPSA(molecule),
-                rdMolDescriptors.CalcNumRotatableBonds(molecule),
-                Descriptors.MolLogP(molecule),
-                Descriptors.FpDensityMorgan1(molecule),
-                Descriptors.NumAromaticRings(molecule),
-                Descriptors.FractionCSP3(molecule),
-                Descriptors.NumAliphaticRings(molecule),
-                Descriptors.FpDensityMorgan2(molecule),
-                Descriptors.HeavyAtomMolWt(molecule),
-            ]
-        else:
-            return [0] * len(ds_col)
-    except:
-        return [0] * len(ds_col)
-
+# ------------------------------- #
+# Main Logic
+# ------------------------------- #
 if uploaded_file:
     try:
         df = pd.read_excel(uploaded_file)
         if "smiles" not in df.columns:
-            st.error("❌ Column 'smiles' not found in uploaded file.")
-        else:
-            st.success(f"✅ Loaded {len(df)} molecules from uploaded file.")
+            st.error("❌ Missing required column: `smiles`")
+            st.stop()
 
-            with st.spinner("🔍 Calculating descriptors and making predictions..."):
-                df[ds_col] = df["smiles"].apply(calculate_molecular_properties).apply(pd.Series)
+        st.success(f"✅ File loaded. Total molecules: {len(df)}")
 
-                # Activity Prediction
-                y_pred = activity_model.predict(df[ds_col])
-                y_proba = activity_model.predict_proba(df[ds_col])
-                df["Prediction"] = y_pred
-                df["Probability"] = np.max(y_proba, axis=1)
-                df["Concentration"] = df["Prediction"].apply(
-                    lambda x: "1 and 10 μM" if x == 2 else ("10 μM" if x == 1 else "non-hits")
-                )
-                df["Activity_Status"] = df.apply(get_activity_status, axis=1)
+        with st.spinner("🔬 Calculating descriptors and running models..."):
+            df[descriptor_columns] = df["smiles"].apply(calculate_descriptors).apply(pd.Series)
 
-                # ADMET Predictions
-                for name, model in admet_models.items():
-                    df[f"{name}"] = model.predict(df[ds_col])
-                # Map values in Metabolism and Toxicity columns to descriptive labels
-                df["(Metabolism) CYP3A4"] = df["(Metabolism) CYP3A4"].map({0: "Non-Metabolic (0)", 1: "Metabolic (1)"})
-                df["(Toxicity) NR-AR"] = df["(Toxicity) NR-AR"].map({0: "Non-Toxic (0)", 1: "Toxic (1)"})
+            # Activity prediction
+            df["Prediction"] = activity_model.predict(df[descriptor_columns])
+            df["Probability"] = np.max(activity_model.predict_proba(df[descriptor_columns]), axis=1)
+            df["Concentration"] = df["Prediction"].map({0: "non-hits", 1: "10 μM", 2: "1 and 10 μM"})
+            df["Activity_Status"] = df.apply(get_activity_status, axis=1)
 
+            # ADMET predictions
+            for name, model in models.items():
+                if name != "Activity":
+                    df[name] = model.predict(df[descriptor_columns])
 
-                df.drop(columns=ds_col, inplace=True)
+            # Clean and re-map values
+            df["(Metabolism) CYP3A4"] = df["(Metabolism) CYP3A4"].map({0: "Non-Metabolic (0)", 1: "Metabolic (1)"})
+            df["(Toxicity) NR-AR"] = df["(Toxicity) NR-AR"].map({0: "Non-Toxic (0)", 1: "Toxic (1)"})
 
-            st.success("✅ Predictions completed!")
+            df.drop(columns=descriptor_columns, inplace=True)
 
-            # Summary statistics
-            total_smiles = len(df)
-            total_inactive = (df["Prediction"] == 0).sum()
-            total_10uM = (df["Prediction"] == 1).sum()
-            total_1_and_10uM = (df["Prediction"] == 2).sum()
+        st.success("🎯 Predictions completed successfully!")
 
-            summary_df = pd.DataFrame({
-                "Metric": [
-                    "Total SMILES",
-                    "Inactive (0)",
-                    "10 μM Concentration (1)",
-                    "1 and 10 μM Concentration (2)"
-                ],
-                "Count": [
-                    total_smiles,
-                    total_inactive,
-                    total_10uM,
-                    total_1_and_10uM
-                ]
-            })
+        # ----------------------- #
+        # Summary + Charts
+        # ----------------------- #
+        st.subheader("📊 Prediction Summary")
 
-            st.markdown(
-                "<h3 style='color:#3366cc; font-weight:bold;'>📊 Prediction Summary</h3>",
-                unsafe_allow_html=True
-            )
+        summary = pd.DataFrame({
+            "Metric": ["Inactive (0)", "10 μM (1)", "1 and 10 μM (2)"],
+            "Count": [
+                (df["Prediction"] == 0).sum(),
+                (df["Prediction"] == 1).sum(),
+                (df["Prediction"] == 2).sum()
+            ]
+        })
 
-            st.dataframe(summary_df, use_container_width=True)
+        st.dataframe(summary, use_container_width=True)
 
-            # Plotly Bar Chart
-            bar_fig = px.bar(
-                summary_df[1:],  # exclude "Total SMILES" row
-                x="Metric",
-                y="Count",
-                color="Metric",
-                text="Count",
-                title="Activity Distribution",
-                color_discrete_sequence=px.colors.qualitative.Plotly
-            )
-            bar_fig.update_layout(title_font_size=20, title_x=0.5)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.plotly_chart(px.bar(summary, x="Metric", y="Count", color="Metric",
+                                   title="Activity Distribution", text="Count",
+                                   color_discrete_sequence=px.colors.qualitative.Set2), use_container_width=True)
+        with col2:
+            st.plotly_chart(px.pie(summary, names="Metric", values="Count",
+                                   title="Proportions", color_discrete_sequence=px.colors.sequential.RdBu), use_container_width=True)
 
-            # Plotly Pie Chart
-            pie_fig = px.pie(
-                summary_df[1:],  # exclude "Total SMILES" row
-                names="Metric",
-                values="Count",
-                title="Activity Class Proportion",
-                color_discrete_sequence=px.colors.qualitative.Set3
-            )
-            pie_fig.update_traces(textposition='inside', textinfo='percent+label')
-            pie_fig.update_layout(title_font_size=20, title_x=0.5)
+        # ----------------------- #
+        # Detailed Table
+        # ----------------------- #
+        st.subheader("🔬 Activity + ADMET Predictions")
+        display_cols = ["smiles", "Prediction", "Probability", "Concentration", "Activity_Status"] + list(models.keys())[1:]
+        st.dataframe(df[display_cols], use_container_width=True)
 
-            # Display charts in columns
-            col1, col2 = st.columns(2)
-            with col1:
-                st.plotly_chart(bar_fig, use_container_width=True)
-            with col2:
-                st.plotly_chart(pie_fig, use_container_width=True)
+        # ----------------------- #
+        # Download Options
+        # ----------------------- #
+        st.subheader("📥 Download Predictions")
 
-            # ✅ Combined table: Activity + ADMET
-            st.markdown("### 🔍 Activity + ADMET Predictions")
-            combined_columns = ["smiles", "Prediction", "Probability", "Concentration", "Activity_Status"] + list(admet_models.keys())
-            st.dataframe(df[combined_columns], use_container_width=True)
-
-            st.markdown("### 📥 Download Results")
+        def to_excel_bytes(dataframe):
             output = BytesIO()
-            df.to_excel(output, index=False)
-            st.download_button("Download Excel with Predictions", data=output.getvalue(), file_name="SMILES_Predictions.xlsx")
+            dataframe.to_excel(output, index=False)
+            return output.getvalue()
 
-            # Filter high-confidence predictions
-            high_1_df = df[(df["Prediction"] == 1) & (df["Probability"] > 0.75)]
-            high_2_df = df[(df["Prediction"] == 2) & (df["Probability"] > 0.75)]
-            high_1_and_2_df = df[(df["Prediction"].isin([1, 2])) & (df["Probability"] > 0.75)]
+        st.download_button("Download All Predictions", to_excel_bytes(df), file_name="SMILES_Predictions.xlsx")
 
-            st.markdown("### 🔽 Download High Confidence Predictions")
+        with st.expander("🔽 Download High Confidence Predictions"):
+            high_1 = df[(df["Prediction"] == 1) & (df["Probability"] > 0.75)]
+            high_2 = df[(df["Prediction"] == 2) & (df["Probability"] > 0.75)]
+            combined = df[(df["Prediction"].isin([1, 2])) & (df["Probability"] > 0.75)]
 
             col1, col2, col3 = st.columns(3)
-
             with col1:
-                output_1 = BytesIO()
-                high_1_df.to_excel(output_1, index=False)
-                st.download_button("Download High Class 1 (10 μM)", data=output_1.getvalue(),
-                                   file_name="High_Confidence_Class1_10uM.xlsx")
-
+                st.download_button("High 10 μM (Class 1)", to_excel_bytes(high_1), "High_Class1_10uM.xlsx")
             with col2:
-                output_2 = BytesIO()
-                high_2_df.to_excel(output_2, index=False)
-                st.download_button("Download High Class 2 (1 and 10 μM)", data=output_2.getvalue(),
-                                   file_name="High_Confidence_Class2_1_and_10uM.xlsx")
-
+                st.download_button("High 1 & 10 μM (Class 2)", to_excel_bytes(high_2), "High_Class2_1and10uM.xlsx")
             with col3:
-                output_combined = BytesIO()
-                high_1_and_2_df.to_excel(output_combined, index=False)
-                st.download_button("Download High Class 1 & 2 Combined", data=output_combined.getvalue(),
-                                   file_name="High_Confidence_Class1_and_2.xlsx")
+                st.download_button("Combined High Class 1 & 2", to_excel_bytes(combined), "High_Class1and2.xlsx")
 
     except Exception as e:
-        st.error(f"❌ Error: {e}")
+        st.error(f"❌ An error occurred: {e}")
 else:
-    st.info("Upload an Excel file with a `smiles` column from the sidebar to begin.")
+    st.info("📤 Please upload a `.xlsx` file with a column named `smiles` to begin.")
