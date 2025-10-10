@@ -37,10 +37,10 @@ with st.sidebar:
 def load_models():
     try:
         return {
-            "Activity": joblib.load("C:\Users\ADMIN\Desktop\Sharvari Aware data\Downloads data\Downloads data\Notebook\hybrid_model.pkl"),
-            "(Absorption) Caco-2": joblib.load("C:\Users\ADMIN\Desktop\Jupyter Notebook\absorption_hybrid_Caco2_Wang.pkl"),
+            "Activity": joblib.load("hybrid_model.pkl"),
+            "(Absorption) Caco-2": joblib.load("absorption_hybrid_Caco2_Wang.pkl"),
             
-            "(Metabolism) CYP2D6 Substrate": joblib.load("C:\Users\ADMIN\Downloads\Metabolism_Hybrid_CYP2D6.pkl"),
+            "(Metabolism) CYP2D6 Substrate": joblib.load("Metabolism_Hybrid_CYP2D6.pkl"),
            
         }
     except FileNotFoundError as e:
@@ -186,4 +186,5 @@ if uploaded_file:
         st.error(f"❌ An error occurred: {e}")
 else:
     st.info("📤 Please upload a `.xlsx` file with a column named `smiles` to begin.")
+
 
